@@ -142,7 +142,7 @@
         <li>在前端实现多标签 AND 筛选 + 瀑布流浏览 + 灯箱查看</li>
     </ol>
     <p><b>程序对 Eagle 资源库的所有访问均为只读，不会修改、创建或删除任何 Eagle 数据。</b></p>
-    <p>Web Eagle <b>v4.1</b> 新增 CSRF 保护、Rate Limit 防刷、XSS 防护等安全机制（详见第 11 章）。</p>
+    <p>Web Eagle <b>v4.2</b> 新增 CSRF 保护、Rate Limit 防刷、XSS 防护、动态响应式检测、图片预加载、DOM 内存管理等安全与性能机制（详见第 11 章）。</p>
 
     <h3 id="overview-nodb">1.2 不需要数据库</h3>
     <table>
@@ -158,10 +158,13 @@
         <tr><th>功能</th><th>说明</th></tr>
         <tr><td>瀑布流浏览</td><td>图片保留原始比例，自适应列数排列</td></tr>
         <tr><td>多标签 AND 筛选</td><td>空格分隔多个标签，交集筛选</td></tr>
-        <tr><td>搜索芯片</td><td>已选标签显示为芯片，点击 × 移除，超过 3 个折叠显示 +N 徽章</td></tr>
-        <tr><td>标签管理弹窗</td><td>点击 +N 打开居中弹窗，可查看、添加、删除搜索词</td></tr>
+        <tr><td>搜索芯片</td><td>已选标签显示为芯片，点击 × 移除，超出搜索框宽度时折叠显示 +N 徽章</td></tr>
+        <tr><td>动态响应式</td><td>实时检测窗口宽度变化，PC/移动端逻辑自动切换，平板横竖屏完美适配</td></tr>
+        <tr><td>标签管理弹窗</td><td>点击 +N 打开居中弹窗，可查看、添加、删除搜索词，一键清除全部</td></tr>
         <tr><td>灯箱大图</td><td>点击缩略图查看原图，图片独立容器不挤压信息栏</td></tr>
-        <tr><td>灯箱缩放</td><td>滚轮缩放以鼠标为中心，+/- 按钮缩放，缩放条显示百分比</td></tr>
+        <tr><td>灯箱缩放</td><td>滚轮缩放以鼠标为中心，+/- 按钮缩放，缩放条显示百分比，移动端支持双指缩放</td></tr>
+        <tr><td>图片预加载</td><td>灯箱切换时预加载相邻图片，切换更流畅，等待时间更短</td></tr>
+        <tr><td>DOM 内存管理</td><td>无限滚动时自动清理旧 DOM 节点，防止页面卡顿，支持浏览数万张图片</td></tr>
         <tr><td>快捷键提示</td><td>打开灯箱时显示快捷键提示，3 秒后淡出消失</td></tr>
         <tr><td>多选下载</td><td>左上角按钮进入多选模式，顶部栏显示已选数量并批量下载</td></tr>
         <tr><td>分享链接</td><td>HMAC 签名 30 天有效，可分享给他人查看单张图片</td></tr>
@@ -172,8 +175,9 @@
         <tr><td>灯箱加载动画</td><td>原图加载中显示 spinner，不再空白等待</td></tr>
         <tr><td>CSRF 保护</td><td>所有写操作携带 CSRF token，防跨站请求伪造</td></tr>
         <tr><td>Rate Limit 防刷</td><td>刷新接口同一 IP 最多 5 次 / 10 分钟，超限提示等待</td></tr>
-        <tr><td>XSS 防护</td><td>文字 HTML 转义，颜色值格式校验，图片 ID 严格 UUID 校验</td></tr>
-        <tr><td>移动端适配</td><td>&lt; 540px 隐藏侧边栏，灯箱按钮适配小屏</td></tr>
+        <tr><td>XSS 防护</td><td>文字 HTML 转义，颜色值严格格式校验（仅允许 hex/rgba/hsl），图片 ID 严格 UUID 校验</td></tr>
+        <tr><td>内存泄漏防护</td><td>事件监听器自动解绑，定时器清理，长时间运行不卡顿</td></tr>
+        <tr><td>移动端适配</td><td>实时检测设备类型，窗口调整自动切换 PC/移动端逻辑，平板横竖屏完美适配</td></tr>
     </table>
 
     <!-- ===== 2. 运行环境 ===== -->
@@ -731,7 +735,7 @@ X-CSRF-Token: xxxxxxxxxxxx...</code></pre>
     <p>所有用户可见的文字内容（图片名称、标签名）均经过 HTML 转义后输出，杜绝 XSS 注入。</p>
     <p>颜色值（标签颜色、调色板）经过格式校验，只允许合法 hex/rgb/rgba/hsl 值进入 CSS 属性。</p>
     <p>图片 ID 使用严格 UUID 格式（8-4-4-4-12 小写十六进制）校验，无效 ID 返回 HTTP 400。</p>
-    <p>颜色值（标签颜色、调色板）经过格式校验，只允许合法 <code>#fff</code> / <code>#ffffff</code> / <code>rgb()</code> / <code>rgba()</code> / <code>hsl()</code> 值进入 CSS 属性。</p>
+    <p>颜色值（标签颜色、调色板）经过严格格式校验，只允许合法 <code>#fff</code> / <code>#ffffff</code> / <code>rgb()</code> / <code>rgba()</code> / <code>hsl()</code> 值进入 CSS 属性，非法格式一律返回默认颜色。</p>
 
     <h3 id="security-prod">11.4 生产环境安全建议</h3>
     <table>
@@ -806,7 +810,7 @@ X-CSRF-Token: xxxxxxxxxxxx...</code></pre>
     <p>所有按钮和搜索栏鼠标悬浮时会显示功能说明和快捷键提示。</p>
 
     <br>
-    <p style="color:#444;text-align:center;font-size:12px;">Web Eagle v6.1 | 2026-04-21 | 无限滚动 + 灯箱轻量 API + CSRF + RateLimit + XSS 防护</p>
+    <p style="color:#444;text-align:center;font-size:12px;">Web Eagle v4.2 | 2026-04-24 | 动态响应式 + 图片预加载 + DOM内存管理 + XSS严格校验 + 内存泄漏防护</p>
 </main>
 
 <script>

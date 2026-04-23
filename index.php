@@ -15,7 +15,7 @@
         <span class="logo">🦅 Web Eagle</span>
     </div>
 
-    <div class="top-bar-center" style="max-width:720px;">
+    <div class="top-bar-center">
         <!-- 搜索框：加宽，芯片 + 输入混排 -->
         <div class="search-box" id="searchBox">
             <!-- 芯片区域（折叠显示） -->
@@ -44,13 +44,11 @@
     </div>
 
     <div class="top-bar-right">
-        <button class="topbar-multi-btn" id="multiSelectToggle" title="多选模式">✅️</button>
-        <button class="topbar-multi-btn topbar-multi-download" id="topbarMultiDownload" title="下载已选" style="display:none">
-            <span id="topbarDlCount"></span>
-        </button>
         <span class="image-count" id="imageCount">0 张图片</span>
+        <button class="topbar-multi-btn" id="multiSelectToggle" title="多选模式">✅️</button>
+        <button class="topbar-multi-btn topbar-multi-download" id="topbarMultiDownload" title="下载已选" style="display:none">⬇</button>
         <button class="icon-btn" id="btnRefresh" title="刷新缓存">&#8635;</button>
-        <a href="setup.php" class="icon-btn" title="设置">&#9881;</a>
+        <a href="setup.php" class="icon-btn settings-btn" title="设置">&#9881;</a>
     </div>
 </header>
 
@@ -99,8 +97,6 @@
 
     <!-- 灯箱工具栏 -->
     <div class="lightbox-toolbar">
-        <span class="lightbox-counter" id="lightboxCounter">1 / 1</span>
-        <div class="lb-tool-divider"></div>
         <a class="lb-tool-btn" id="lightboxDownload" download title="下载原图（Ctrl+S）">&#11015; 下载</a>
         <button class="lb-tool-btn" id="lightboxShare" title="复制链接（Ctrl+C）">&#128203; 复制链接</button>
     </div>

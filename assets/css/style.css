@@ -1,4 +1,4 @@
-/* Web Eagle v4.1 - 样式表 */
+/* Web Eagle v4.2 - 样式表 */
 
 :root {
     --bg-primary: #0f0f1a;
@@ -40,7 +40,7 @@ body {
 }
 
 .top-bar-left { flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
-.top-bar-center { flex: 1; max-width: 720px; }
+.top-bar-center { flex: 1; min-width: 0; max-width: none; }
 .top-bar-right { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
 
 .logo {
@@ -57,14 +57,14 @@ body {
     display: flex;
     align-items: center;
     flex: 1;
-    max-width: 680px;
-    margin: 0 auto;
+    max-width: none;
+    margin: 0;
     flex-wrap: nowrap; /* 不换行 */
     gap: 6px;
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 12px;
-    padding: 6px 12px;
+    padding: 6px 8px 6px 12px;
     cursor: text;
     transition: all 0.2s;
     min-height: 44px;
@@ -159,8 +159,8 @@ body {
 }
 .search-chips-expanded.visible { display: flex; }
 
-/* 文字输入区域 */
-.search-input-wrapper { display: flex; align-items: center; flex: 1; min-width: 100px; }
+/* 文字输入区域：不参与 flex 缩放，保证最小宽度 */
+.search-input-wrapper { display: flex; align-items: center; flex: 1 1 80px; min-width: 80px; }
 .search-icon { font-size: 14px; opacity: 0.4; margin-right: 6px; flex-shrink: 0; }
 .search-box input {
     flex: 1; background: transparent; border: none; outline: none;
@@ -168,14 +168,14 @@ body {
 }
 .search-box input::placeholder { color: rgba(255,255,255,0.35); }
 
-/* 搜索框清除按钮 */
+/* 搜索框清除按钮：始终在最右侧 */
 .search-clear-btn {
     display: none;
     background: rgba(255,255,255,0.15);
     border: none;
     border-radius: 50%;
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     color: rgba(255,255,255,0.7);
     font-size: 12px;
     cursor: pointer;
@@ -183,7 +183,7 @@ body {
     align-items: center;
     justify-content: center;
     transition: all 0.15s;
-    margin-left: 4px;
+    margin-left: 2px;
 }
 .search-clear-btn:hover {
     background: rgba(255,100,100,0.8);
@@ -213,15 +213,16 @@ body {
     background: transparent; color: var(--text-secondary);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     font-size: 16px; transition: all 0.15s; text-decoration: none;
+    flex-shrink: 0;
 }
 .icon-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-.image-count { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+.image-count { font-size: 13px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
 
 .topbar-multi-btn {
-    padding: 6px 12px; border-radius: 8px;
+    padding: 6px 12px; border-radius: 8px; min-height: 36px;
     border: 1px solid var(--border); background: var(--bg-tertiary);
     color: var(--text-secondary); font-size: 13px; cursor: pointer;
-    transition: all 0.15s;
+    transition: all 0.15s; flex-shrink: 0;
 }
 .topbar-multi-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
 .topbar-multi-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -450,11 +451,14 @@ body {
 .lightbox-media-wrapper video {
     max-width: 90vw; max-height: calc(100vh - 240px);
     border-radius: 4px; outline: none;
+    object-fit: contain;
+    background: #000;
+    pointer-events: auto; /* 视频需要可交互（原生控件） */
 }
 
 .lightbox-info {
     position: absolute;
-    bottom: 60px; /* 在工具栏上方 */
+    bottom: 70px; /* 在工具栏上方 */
     left: 0;
     right: 0;
     text-align: center;
@@ -491,10 +495,7 @@ body {
     background: rgba(255,255,255,0.1); 
     color: #ccc;
 }
-.lb-size { 
-    font-size: 12px; 
-    color: var(--text-muted); 
-}
+
 
 /* 灯箱控制按钮 */
 .lightbox-close {
@@ -519,12 +520,17 @@ body {
     align-items: center; justify-content: center;
     transition: all 0.15s; z-index: 10;
 }
-.lightbox-prev:hover, .lightbox-next:hover { background: rgba(102,126,234,0.4); }
+/* 仅鼠标设备使用 hover 效果，避免触摸设备悬停粘滞 */
+@media (hover: hover) {
+    .lightbox-prev:hover, .lightbox-next:hover { background: rgba(102,126,234,0.4); }
+}
+/* 触摸设备：按下时蓝色，松开后恢复 */
+.lightbox-prev:active, .lightbox-next:active { background: rgba(102,126,234,0.4); }
 .lightbox-prev { left: 16px; }
 .lightbox-next { right: 16px; }
 .lightbox-prev:disabled, .lightbox-next:disabled { opacity: 0.2; cursor: not-allowed; }
 
-/* 灯箱工具栏 */
+/* 灯箱工具栏（桌面端） */
 .lightbox-toolbar {
     position: absolute; bottom: 20px; left: 50%;
     transform: translateX(-50%);
@@ -534,8 +540,6 @@ body {
     border-radius: 24px;
     z-index: 10;
 }
-.lightbox-counter { font-size: 13px; color: #ccc; min-width: 60px; text-align: center; }
-.lb-tool-divider { width: 1px; height: 20px; background: rgba(255,255,255,0.2); }
 .lb-tool-btn {
     padding: 6px 12px; border-radius: 6px;
     border: 1px solid rgba(255,255,255,0.2);
@@ -545,6 +549,7 @@ body {
     transition: all 0.15s;
 }
 .lb-tool-btn:hover { background: rgba(102,126,234,0.3); border-color: rgba(102,126,234,0.5); color: #fff; }
+.lb-download-size { font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 400; margin-left: 2px; }
 
 /* 缩放条（移到头部，避免与底部信息栏重叠） */
 .zoom-bar {
@@ -845,11 +850,230 @@ body {
 
 /* ===== 响应式 ===== */
 @media (max-width: 768px) {
-    .top-bar-center { max-width: none; }
-    .search-box { max-width: none; }
-    .lightbox-content { padding: 20px; }
+    /* ===== 顶部栏移动端 ===== */
+    .top-bar { padding: 0 10px; gap: 8px; }
+    .top-bar-left .logo { font-size: 0; }
+    .top-bar-left .logo::before { content: '🦅'; font-size: 22px; }
+    .top-bar-center { max-width: none; flex: 1; min-width: 0; }
+    .top-bar-right { gap: 6px; flex-shrink: 0; }
+    .top-bar-right .image-count { display: none; } /* 隐藏图片计数 */
+    .top-bar-right .settings-btn { display: none !important; } /* 移动端隐藏设置按钮 */
+    .icon-btn { width: 32px; height: 32px; font-size: 14px; }
+    .topbar-multi-btn { padding: 5px 10px; font-size: 12px; }
+    
+    /* ===== 搜索框移动端：自适应宽度，不撑开顶栏 ===== */
+    .search-box { 
+        max-width: none; 
+        min-height: 40px; 
+        max-height: 40px;
+        padding: 5px 6px 5px 10px;
+        border-radius: 10px;
+        overflow: hidden;
+        flex-wrap: nowrap;
+        flex: 1 1 0;
+        min-width: 0;
+        margin: 0;
+        gap: 4px;
+    }
+    .search-chips-area { gap: 4px; }
+    .search-tag-chip { 
+        padding: 2px 6px 2px 5px; 
+        font-size: 12px; 
+        max-width: 100px;
+    }
+    .search-tag-name { max-width: 60px; }
+    .search-input-wrapper { min-width: 60px; flex: 1 1 60px; }
+    .search-box input { font-size: 13px; }
+    .search-box input::placeholder { font-size: 12px; }
+    .search-input-wrapper { min-width: 50px; flex: 1 1 50px; }
+    .search-clear-btn { width: 20px; height: 20px; font-size: 10px; }
+    .search-more-badge { min-width: 24px; height: 22px; font-size: 11px; padding: 0 6px; }
+    
+    /* 搜索提示：3秒后自动隐藏 */
+    .search-tips.visible { 
+        animation: fadeOutAfter3s 3s forwards;
+    }
+    @keyframes fadeOutAfter3s {
+        0%, 80% { opacity: 1; }
+        100% { opacity: 0; pointer-events: none; }
+    }
+    
+    /* 芯片展开面板 */
+    .search-chips-expanded {
+        left: -10px;
+        right: -10px;
+        min-width: auto;
+        max-width: none;
+        width: calc(100vw - 20px);
+    }
+    
+    /* ===== 侧边栏移动端：覆盖式抽屉 ===== */
+    .tag-sidebar {
+        position: fixed;
+        top: var(--topbar-height);
+        left: 0;
+        bottom: 0;
+        z-index: 150;
+        width: 280px;
+        box-shadow: 4px 0 20px rgba(0,0,0,0.5);
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+    }
+    .tag-sidebar:not(.collapsed) {
+        transform: translateX(0);
+    }
+    .tag-sidebar.collapsed {
+        width: 280px;
+        opacity: 1;
+        transform: translateX(-100%);
+    }
+    
+    /* 侧边栏切换按钮：右下角 */
+    .sidebar-toggle {
+        left: auto;
+        right: 20px;
+        width: 44px;
+        height: 44px;
+        font-size: 18px;
+    }
+    
+    /* ===== 图片网格移动端 ===== */
+    .image-area { padding: 10px; }
+    .image-grid { column-count: 2; column-gap: 8px; }
+    .image-card { margin-bottom: 8px; border-radius: 6px; }
+    
+    /* 卡片overlay：触摸设备常显 */
+    .image-card .card-overlay {
+        opacity: 1;
+        background: linear-gradient(transparent 30%, rgba(0,0,0,0.8));
+    }
+    .card-overlay .card-name { font-size: 11px; }
+    .card-actions {
+        opacity: 1;
+        bottom: 38px;
+        right: 6px;
+    }
+    .card-action-btn {
+        width: 26px;
+        height: 26px;
+        font-size: 11px;
+        border-radius: 6px;
+    }
+    .card-checkbox {
+        width: 20px;
+        height: 20px;
+        top: 6px;
+        left: 6px;
+    }
+    
+    /* ===== 灯箱移动端 ===== */
+    .lightbox-media-wrapper {
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        bottom: 70px;
+    }
+    
+    /* 移动端视频优化：全屏适配 */
+    .lightbox-media-wrapper video {
+        max-width: 100% !important;
+        max-height: 100% !important;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        border-radius: 4px;
+        outline: none;
+        background: #000;
+    }
+    
+    .lightbox-close {
+        top: 10px;
+        right: 10px;
+        width: 40px;
+        height: 40px;
+        font-size: 24px;
+    }
+    
+    .lightbox-prev, .lightbox-next {
+        width: 48px;
+        height: 48px;
+        font-size: 22px;
+    }
     .lightbox-prev { left: 8px; }
     .lightbox-next { right: 8px; }
-    .lightbox-toolbar { bottom: 12px; }
-    .tags-modal { padding: 16px; width: 95%; }
+    
+    .lightbox-info {
+        bottom: 70px;
+        padding: 0 20px;
+    }
+    .lb-name { font-size: 13px; max-width: 90vw; }
+    .lb-tags { max-width: 90vw; gap: 4px; }
+    .lb-tag { padding: 2px 8px; font-size: 10px; }
+
+    
+    .lightbox-toolbar {
+        bottom: 12px;
+        padding: 8px 14px;
+        gap: 10px;
+        border-radius: 24px;
+        justify-content: center; /* 按钮居中 */
+    }
+    .lb-tool-btn {
+        padding: 9px 14px;
+        font-size: 13px;
+        border-radius: 8px;
+        flex-shrink: 0;
+        min-width: 56px;
+        text-align: center;
+    }
+    .lb-download-size { font-size: 10px; }
+    
+    /* 缩放条移动端 */
+    .zoom-bar {
+        top: 12px;
+        padding: 8px 12px;
+        gap: 10px;
+    }
+    .zoom-slider { width: 90px; }
+    .zoom-label { font-size: 12px; min-width: 38px; flex-shrink: 0; }
+    .zoom-btn { width: 28px; height: 28px; font-size: 16px; flex-shrink: 0; }
+    
+    /* 快捷键提示：移动端隐藏（无键盘） */
+    .lightbox-shortcuts { display: none !important; }
+    
+    /* ===== 标签管理模态窗口移动端 ===== */
+    .tags-modal {
+        padding: 16px;
+        width: 95%;
+        max-height: 85vh;
+        margin: 10px;
+        border-radius: 10px;
+    }
+    .tags-modal-header { margin-bottom: 16px; padding-bottom: 12px; }
+    .tags-modal-title { font-size: 16px; }
+    .tags-modal-content { gap: 6px; margin-bottom: 16px; }
+    .tags-modal-chip { padding: 6px 10px; font-size: 12px; }
+    .tags-modal-footer { gap: 10px; flex-wrap: wrap; }
+    .tags-modal-input { 
+        flex: 1 1 100%; 
+        padding: 10px 12px; 
+        font-size: 14px;
+        order: 1;
+    }
+    .tags-modal-clear-btn {
+        padding: 8px 12px;
+        font-size: 12px;
+        order: 2;
+    }
+    .tags-modal-add-btn {
+        padding: 10px 16px;
+        font-size: 13px;
+        order: 3;
+    }
+    
+    /* ===== 加载状态移动端 ===== */
+    .loading, .empty-state { padding: 40px 16px; }
+    .empty-state .empty-icon { font-size: 36px; }
+    .empty-state p { font-size: 13px; }
+    .load-more { padding: 16px; font-size: 12px; }
 }

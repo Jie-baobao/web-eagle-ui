@@ -32,17 +32,17 @@
         dom.imageArea            = $('#imageArea');
         dom.multiSelectToggle    = $('#multiSelectToggle');
         dom.topbarMultiDownload  = $('#topbarMultiDownload');
-        dom.topbarDlCount        = $('#topbarDlCount');
         dom.lightbox             = $('#lightbox');
         dom.lightboxImage        = $('#lightboxImage');
         dom.lightboxVideo        = $('#lightboxVideo');
+        dom.mediaWrapper         = dom.lightbox ? dom.lightbox.querySelector('.lightbox-media-wrapper') : null;
         dom.lightboxInfo         = $('#lightboxInfo');
         dom.lightboxClose        = $('#lightboxClose');
         dom.lightboxPrev         = $('#lightboxPrev');
         dom.lightboxNext         = $('#lightboxNext');
         dom.lightboxDownload     = $('#lightboxDownload');
         dom.lightboxShare        = $('#lightboxShare');
-        dom.lightboxCounter      = $('#lightboxCounter');
+        // dom.lightboxCounter   已移除（灯箱工具栏不再显示计数器）
         dom.lightboxSpinner      = $('#lightboxSpinner');
         dom.lightboxBackdrop     = dom.lightbox ? dom.lightbox.querySelector('.lightbox-backdrop') : null;
         dom.zoomBar              = $('#zoomBar');
@@ -82,12 +82,64 @@
         });
     }
 
+    // ── 移动端检测（动态）────────────────────────────────────────
+    function checkIsMobile() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
+            || window.innerWidth <= 768;
+    }
+    var isMobile = checkIsMobile();
+    
+    // 监听窗口调整，更新移动端状态
+    var _resizeTimer = null;
+    window.addEventListener('resize', function() {
+        if (_resizeTimer) clearTimeout(_resizeTimer);
+        _resizeTimer = setTimeout(function() {
+            var wasMobile = isMobile;
+            isMobile = checkIsMobile();
+            // 如果状态改变，重新渲染搜索芯片
+            if (wasMobile !== isMobile) {
+                renderSearchChips();
+            }
+        }, 150);
+    });
+
+    // ── 图片预加载（提升灯箱切换体验）────────────────────────────────────────
+    var _preloadQueue = [];
+    var _preloading = false;
+    
+    function preloadImage(id) {
+        if (!id || _preloadQueue.indexOf(id) !== -1) return;
+        _preloadQueue.push(id);
+        if (!_preloading) {
+            _preloading = true;
+            setTimeout(function() {
+                var img = new Image();
+                img.src = 'api.php?action=image_proxy&id=' + encodeURIComponent(_preloadQueue.shift()) + '&type=thumbnail';
+                img.onload = img.onerror = function() {
+                    _preloading = false;
+                    if (_preloadQueue.length > 0) preloadImage(_preloadQueue[0]);
+                };
+            }, 100);
+        }
+    }
+    
+    function preloadAdjacentImages(idx) {
+        // 预加载前后各2张图片的缩略图
+        var preloadRange = isMobile ? 1 : 2;
+        for (var i = idx - preloadRange; i <= idx + preloadRange; i++) {
+            if (i >= 0 && i < state.images.length && i !== idx) {
+                preloadImage(state.images[i].id);
+            }
+        }
+    }
+
     // ── INIT ────────────────────────────────────────────────
     async function init() {
         initDom();
         setupSidebarToggle();
         bindEvents();
         setupInfiniteScroll();
+        setupTouchGestures(); // 触摸手势支持
 
         try { var r = await api('csrf_token'); if (r.success && r.token) state.csrfToken = r.token; } catch (e) {}
 
@@ -198,6 +250,32 @@
         dom.imageGrid.innerHTML = '<div class="empty-state"><div class="empty-icon">&#9881;</div><p>' + esc(msg) + '</p></div>';
     }
 
+    // DOM节点数限制（防止内存过大）
+    var MAX_DOM_NODES = 500; // 最大保留DOM节点数
+    var _domCleanupTimer = null;
+    
+    function cleanupOldDomNodes() {
+        if (_domCleanupTimer) clearTimeout(_domCleanupTimer);
+        _domCleanupTimer = setTimeout(function() {
+            var cards = dom.imageGrid.querySelectorAll('.image-card');
+            if (cards.length > MAX_DOM_NODES) {
+                // 移除最旧的节点（保留最新加载的）
+                var removeCount = cards.length - MAX_DOM_NODES;
+                for (var i = 0; i < removeCount; i++) {
+                    var card = cards[i];
+                    if (card && card.parentNode) {
+                        card.parentNode.removeChild(card);
+                    }
+                }
+                // 更新state.images，移除已清理的图片
+                if (removeCount > 0 && state.images.length > MAX_DOM_NODES) {
+                    state.images = state.images.slice(removeCount);
+                    state.page = Math.ceil(state.images.length / state.perPage);
+                }
+            }
+        }, 2000); // 延迟2秒执行，避免阻塞交互
+    }
+
     function renderNewImages(images) {
         state.loadingMore = false;
         hideLoadMoreLoader();
@@ -208,6 +286,12 @@
                 : '资源库为空，请先在 Eagle 中添加图片';
             dom.imageGrid.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128269;</div><p>' + tip + '</p></div>';
             return;
+        }
+        
+        // DOM节点数检查
+        var currentCount = dom.imageGrid.querySelectorAll('.image-card').length;
+        if (currentCount > MAX_DOM_NODES) {
+            cleanupOldDomNodes();
         }
 
         var html = '';
@@ -271,61 +355,233 @@
     // ── 搜索芯片（折叠显示）────────────────────────────────
     var searchDebounce = null;
 
+    // 计算可见芯片数量（移动端动态，PC 端最多 3 个）
+    // 采用先渲染后测量的方式：渲染全部芯片，然后根据搜索框实际宽度逐个隐藏溢出的
+    function calcVisibleChipCount() {
+        if (state.chipsExpanded) return state.searchTerms.length;
+        var count = Math.min(state.MAX_VISIBLE_CHIPS, state.searchTerms.length);
+        if (!isMobile) return count;
+        
+        var box = dom.searchBox;
+        if (!box || state.searchTerms.length === 0) return count;
+        
+        var chipsArea = dom.searchChipsArea;
+        var inputWrapper = dom.searchInput ? dom.searchInput.parentElement : null;
+        var clearBtn = dom.searchClearBtn;
+        
+        // 预估：每个芯片约 80-120px，+N 徽章约 40px，输入框 60px，清除按钮 22px
+        var chipGap = 4;
+        var badgeWidth = 40;
+        var inputMinW = 60;
+        var clearBtnW = clearBtn && state.searchTerms.length > 0 ? 22 : 0;
+        var paddingTotal = 16; // box padding
+        
+        var availForChips = box.clientWidth - paddingTotal - inputMinW - clearBtnW;
+        if (availForChips <= 40) return 0; // 空间不够，全部折叠
+        
+        // 逐个测量芯片宽度
+        var totalChipW = 0;
+        var visible = 0;
+        for (var i = 0; i < state.searchTerms.length; i++) {
+            var term = state.searchTerms[i];
+            // 估算每个芯片宽度：dots(8+5) + name(每字~13px, max 60px) + remove(16+5) + padding(5+6) + gap
+            var nameW = Math.min(term.length * 13, 60);
+            var chipW = 8 + 5 + nameW + 16 + 5 + 5 + 6 + chipGap; // ~105px typical
+            if (i < state.searchTerms.length - 1 || totalChipW + chipW > availForChips - badgeWidth) {
+                // 还不是最后一个或空间快满了
+            }
+            if (totalChipW + chipW + (i > 0 && i < state.searchTerms.length - 1 ? badgeWidth : 0) > availForChips) {
+                break;
+            }
+            totalChipW += chipW;
+            visible++;
+        }
+        
+        // 如果最后一个芯片之后还有剩余的，需要为 +N badge 留空间
+        var hiddenCount = state.searchTerms.length - visible;
+        if (hiddenCount > 0 && totalChipW + badgeWidth > availForChips && visible > 0) {
+            visible--;
+        }
+        
+        return Math.max(0, visible);
+    }
+
     // 渲染搜索词芯片（折叠模式）
+    // 移动端：先渲染全部芯片到 DOM，测量实际宽度后，只隐藏溢出的
     function renderSearchChips() {
         var container = dom.searchChipsArea;
         var terms = state.searchTerms;
-        
+
         if (terms.length === 0) {
             container.innerHTML = '';
             dom.searchInput.value = '';
             dom.searchInput.placeholder = '输入标签或图片名称（空格分隔多个关键词）';
             hideExpandedChips();
-            // 隐藏清除按钮
             updateClearButtonVisibility();
             return;
         }
-        // 显示/隐藏清除按钮
         updateClearButtonVisibility();
 
-        var visibleCount = state.chipsExpanded ? terms.length : Math.min(state.MAX_VISIBLE_CHIPS, terms.length);
-        var hiddenCount = terms.length - visibleCount;
-        if (state.chipsExpanded) hiddenCount = 0;
+        // 展开模式：直接显示全部
+        if (state.chipsExpanded) {
+            var chipsHtml = '';
+            terms.forEach(function (term) {
+                var matchedTag = null;
+                state.tags.forEach(function (t) {
+                    if (t.name.toLowerCase() === term.toLowerCase()) matchedTag = t;
+                });
+                var colorDot = matchedTag ? '<span class="search-tag-dot" style="background:' + safeColor(matchedTag.color) + '"></span>' : '';
+                chipsHtml += '<span class="search-tag-chip" data-term="' + escAttr(term) + '">' +
+                    colorDot +
+                    '<span class="search-tag-name">' + esc(term) + '</span>' +
+                    '<span class="search-tag-remove" title="移除">&#215;</span></span>';
+            });
+            container.innerHTML = chipsHtml;
+            dom.searchInput.value = '';
+            dom.searchInput.placeholder = '';
+            renderExpandedChips();
+            return;
+        }
 
-        // 显示的芯片
-        var chipsHtml = '';
-        for (var i = 0; i < visibleCount; i++) {
-            var term = terms[i];
+        // PC端：动态测量实际宽度，折叠溢出芯片（与移动端逻辑一致）
+        if (!isMobile) {
+            var allChipsHtml = '';
+            terms.forEach(function (term, idx) {
+                var matchedTag = null;
+                state.tags.forEach(function (t) {
+                    if (t.name.toLowerCase() === term.toLowerCase()) matchedTag = t;
+                });
+                var colorDot = matchedTag ? '<span class="search-tag-dot" style="background:' + safeColor(matchedTag.color) + '"></span>' : '';
+                allChipsHtml += '<span class="search-tag-chip" data-idx="' + idx + '" data-term="' + escAttr(term) + '">' +
+                    colorDot +
+                    '<span class="search-tag-name">' + esc(term) + '</span>' +
+                    '<span class="search-tag-remove" title="移除">&#215;</span></span>';
+            });
+            container.innerHTML = allChipsHtml;
+            
+            // 等待渲染完成后测量
+            requestAnimationFrame(function () {
+                var chips = container.querySelectorAll('.search-tag-chip');
+                if (!chips.length) return;
+                var clearBtn = dom.searchClearBtn;
+                var box = dom.searchBox;
+                if (!box) return;
+                var badgeWidth = 40;
+                var inputMinW = 80; // PC端输入框最小宽度稍大
+                var clearBtnW = (clearBtn && state.searchTerms.length > 0) ? clearBtn.offsetWidth : 0;
+                var boxPadding = 20;
+                var availForChips = box.clientWidth - boxPadding - inputMinW - clearBtnW;
+                var totalW = 0;
+                var visibleCount = 0;
+                for (var i = 0; i < chips.length; i++) {
+                    var chipW = chips[i].offsetWidth + 6; // PC端gap稍大
+                    var needBadge = (i < chips.length - 1) ? badgeWidth : 0;
+                    if (totalW + chipW + needBadge > availForChips) {
+                        break;
+                    }
+                    totalW += chipW;
+                    visibleCount++;
+                }
+                var hiddenCount = chips.length - visibleCount;
+                if (hiddenCount <= 0) {
+                    dom.searchInput.value = '';
+                    dom.searchInput.placeholder = '添加更多关键词...';
+                    return;
+                }
+                // 隐藏溢出的芯片
+                for (var j = visibleCount; j < chips.length; j++) {
+                    chips[j].style.display = 'none';
+                }
+                // 插入 +N 徽章
+                var badge = document.createElement('span');
+                badge.className = 'search-more-badge';
+                badge.id = 'searchMoreBadge';
+                badge.textContent = '+' + hiddenCount;
+                container.appendChild(badge);
+                dom.searchInput.value = '';
+                dom.searchInput.placeholder = '添加更多关键词...';
+            });
+            return;
+        }
+
+        // 移动端：先渲染全部芯片，再测量实际宽度，隐藏溢出的
+        var allChipsHtml = '';
+        terms.forEach(function (term, idx) {
             var matchedTag = null;
             state.tags.forEach(function (t) {
                 if (t.name.toLowerCase() === term.toLowerCase()) matchedTag = t;
             });
             var colorDot = matchedTag ? '<span class="search-tag-dot" style="background:' + safeColor(matchedTag.color) + '"></span>' : '';
-            chipsHtml += '<span class="search-tag-chip" data-term="' + escAttr(term) + '">' +
+            allChipsHtml += '<span class="search-tag-chip" data-idx="' + idx + '" data-term="' + escAttr(term) + '">' +
                 colorDot +
                 '<span class="search-tag-name">' + esc(term) + '</span>' +
                 '<span class="search-tag-remove" title="移除">&#215;</span></span>';
-        }
+        });
+        container.innerHTML = allChipsHtml;
 
-        // 折叠徽章
-        if (hiddenCount > 0) {
-            chipsHtml += '<span class="search-more-badge" id="searchMoreBadge">+' + hiddenCount + '</span>';
-        }
+        // 等待渲染完成后测量
+        requestAnimationFrame(function () {
+            var chips = container.querySelectorAll('.search-tag-chip');
+            if (!chips.length) return;
 
-        container.innerHTML = chipsHtml;
-        dom.searchInput.value = '';
-        dom.searchInput.placeholder = state.chipsExpanded ? '' : '添加更多关键词...';
-        
-        // 如果展开状态，显示展开面板
-        if (state.chipsExpanded) {
-            renderExpandedChips();
-        }
+            var clearBtn = dom.searchClearBtn;
+            var inputEl = dom.searchInput;
+            var box = dom.searchBox;
+            if (!box) return;
+
+            var badgeWidth = 40;  // +N 徽章预估宽度
+            var inputMinW = 50;   // 输入框最小宽度
+            var clearBtnW = (clearBtn && state.searchTerms.length > 0) ? clearBtn.offsetWidth : 0;
+            var boxPadding = 16;
+
+            // 可用于芯片的总宽度
+            var availForChips = box.clientWidth - boxPadding - inputMinW - clearBtnW;
+
+            var totalW = 0;
+            var visibleCount = 0;
+
+            for (var i = 0; i < chips.length; i++) {
+                var chipW = chips[i].offsetWidth + 4; // 4px gap
+                var needBadge = (i < chips.length - 1) ? badgeWidth : 0;
+                if (totalW + chipW + needBadge > availForChips) {
+                    break;
+                }
+                totalW += chipW;
+                visibleCount++;
+            }
+
+            var hiddenCount = chips.length - visibleCount;
+            if (hiddenCount <= 0) {
+                // 全部能显示，无需折叠
+                dom.searchInput.value = '';
+                dom.searchInput.placeholder = '添加更多关键词...';
+                return;
+            }
+
+            // 隐藏溢出的芯片
+            for (var j = visibleCount; j < chips.length; j++) {
+                chips[j].style.display = 'none';
+            }
+
+            // 插入 +N 徽章
+            var badge = document.createElement('span');
+            badge.className = 'search-more-badge';
+            badge.id = 'searchMoreBadge';
+            badge.textContent = '+' + hiddenCount;
+            container.appendChild(badge);
+
+            dom.searchInput.value = '';
+            dom.searchInput.placeholder = '添加更多关键词...';
+        });
     }
 
     // 渲染展开的芯片面板
     function renderExpandedChips() {
         var panel = dom.searchChipsExpanded;
         if (!panel) return;
+        
+        // 先移除旧的监听器，防止内存泄漏
+        panel.onmouseleave = null;
         
         var html = '';
         state.searchTerms.forEach(function (term) {
@@ -342,7 +598,7 @@
         panel.innerHTML = html;
         panel.classList.add('visible');
         
-        // 绑定鼠标离开事件：鼠标移走自动关闭
+        // 重新绑定鼠标离开事件：鼠标移走自动关闭
         panel.onmouseleave = function () {
             state.chipsExpanded = false;
             hideExpandedChips();
@@ -524,6 +780,7 @@
 
     // 点击标签栏标签 → 添加到搜索词
     function onTagClick(e) {
+        e.stopPropagation(); // 防止冒泡到 document 关闭侧边栏（移动端）
         var el = e.target.closest('.tag-item');
         if (!el) return;
         var tagName = el.dataset.tagName;
@@ -538,7 +795,6 @@
         } else {
             state.searchTerms.push(tagName);
         }
-        state.chipsExpanded = state.searchTerms.length > state.MAX_VISIBLE_CHIPS;
         renderSearchChips();
         renderTagList(dom.tagFilter.value);
         loadImages(true);
@@ -554,18 +810,30 @@
         var SB_W = 260;
         function collapse() {
             sb.classList.add('collapsed');
-            tb.style.left = '20px';
+            if (!isMobile) tb.style.left = '20px';
         }
         function expand() {
             sb.classList.remove('collapsed');
-            tb.style.left = (SB_W + 20) + 'px';
+            if (!isMobile) tb.style.left = (SB_W + 20) + 'px';
         }
         tb.addEventListener('click', function (e) {
             e.stopPropagation();
             if (sb.classList.contains('collapsed')) expand();
             else collapse();
         });
-        expand();
+        // 移动端点击侧边栏外部关闭
+        if (isMobile) {
+            document.addEventListener('click', function (e) {
+                if (!sb.classList.contains('collapsed') && 
+                    !sb.contains(e.target) && 
+                    !tb.contains(e.target)) {
+                    collapse();
+                }
+            });
+            collapse();
+        } else {
+            expand();
+        }
     }
 
     // ── 多选模式 ─────────────────────────────────────────────
@@ -600,7 +868,6 @@
     function updateSelectionUI() {
         var n = Object.keys(state.selectedIds).length;
         dom.topbarMultiDownload.style.display = n > 0 ? 'inline-flex' : 'none';
-        dom.topbarDlCount.textContent = n > 0 ? n : '';
         dom.topbarMultiDownload.disabled = n === 0;
         updateImageCount();
     }
@@ -659,7 +926,8 @@
         scale: 1, ox: 0, oy: 0,
         dragging: false, dragSX: 0, dragSY: 0, dragOX: 0, dragOY: 0,
         hideTimer: null, HIDE_DELAY: 2500,
-        initialScale: 1, // 初始缩放比例（让图片适配屏幕）
+        initialScale: 1,
+        isPinching: false, pinchStartDist: 0, pinchStartScale: 1,
     };
 
     // 计算初始缩放比例（让图片自适应屏幕尺寸）
@@ -685,6 +953,7 @@
         _z.scale = _z.initialScale;
         _z.ox = 0;
         _z.oy = 0;
+        _z.isPinching = false;
         if (!dom.lightboxImage) return;
         // 重置到初始缩放状态（适配屏幕）
         dom.lightboxImage.style.transform = 'scale(' + _z.initialScale + ')';
@@ -800,6 +1069,72 @@
         _showZoomBar();
     }
 
+    // ── 触摸缩放/平移（移动端灯箱） ─────────────────────────
+    function _getPinchDistance(touches) {
+        var dx = touches[0].clientX - touches[1].clientX;
+        var dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function _onImgTouchStart(e) {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            e.stopPropagation();
+            _z.isPinching = true;
+            _z.pinchStartDist = _getPinchDistance(e.touches);
+            _z.pinchStartScale = _z.scale;
+        } else if (e.touches.length === 1 && _z.scale > _z.initialScale * 1.01) {
+            e.stopPropagation();
+            _z.dragging = true;
+            _z.dragSX = e.touches[0].clientX;
+            _z.dragSY = e.touches[0].clientY;
+            _z.dragOX = _z.ox;
+            _z.dragOY = _z.oy;
+            if (dom.lightboxImage) dom.lightboxImage.classList.add('zooming');
+        }
+    }
+
+    function _onImgTouchMove(e) {
+        if (_z.isPinching && e.touches.length === 2) {
+            e.preventDefault();
+            e.stopPropagation();
+            var dist = _getPinchDistance(e.touches);
+            var ratio = dist / _z.pinchStartDist;
+            var newScale = Math.max(_z.initialScale * 0.3, Math.min(_z.initialScale * 10, _z.pinchStartScale * ratio));
+            var midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+            var midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            var img = dom.lightboxImage;
+            if (img) {
+                var rect = img.getBoundingClientRect();
+                var imgCenterX = rect.left + rect.width / 2;
+                var imgCenterY = rect.top + rect.height / 2;
+                var mouseX = midX - imgCenterX;
+                var mouseY = midY - imgCenterY;
+                var scaleRatio = newScale / _z.scale;
+                _z.ox = mouseX - (mouseX - _z.ox) * scaleRatio;
+                _z.oy = mouseY - (mouseY - _z.oy) * scaleRatio;
+            }
+            _z.scale = newScale;
+            _applyZoom();
+            _showZoomBar();
+        } else if (_z.dragging && e.touches.length === 1) {
+            e.stopPropagation();
+            _z.ox = _z.dragOX + (e.touches[0].clientX - _z.dragSX);
+            _z.oy = _z.dragOY + (e.touches[0].clientY - _z.dragSY);
+            _applyZoom();
+        }
+    }
+
+    function _onImgTouchEnd(e) {
+        if (e.touches.length < 2) {
+            _z.isPinching = false;
+        }
+        if (e.touches.length === 0) {
+            _z.dragging = false;
+            if (dom.lightboxImage) dom.lightboxImage.classList.remove('zooming');
+        }
+    }
+
     function _bindZoom() {
         var img = dom.lightboxImage;
         if (!img) return;
@@ -809,6 +1144,12 @@
         document.addEventListener('mousemove', _onMouseMove);
         document.addEventListener('mouseup', _onMouseUp);
         document.addEventListener('mouseleave', _onMouseUp);
+        // 移动端触摸手势：双指缩放 + 放大后单指平移
+        if (isMobile) {
+            img.addEventListener('touchstart', _onImgTouchStart, { passive: false });
+            img.addEventListener('touchmove', _onImgTouchMove, { passive: false });
+            img.addEventListener('touchend', _onImgTouchEnd, { passive: true });
+        }
     }
 
     function _unbindZoom() {
@@ -817,10 +1158,17 @@
             img.removeEventListener('wheel', _onWheel);
             img.removeEventListener('mousedown', _onMouseDown);
             img.removeEventListener('dblclick', _onDblClick);
+            if (isMobile) {
+                img.removeEventListener('touchstart', _onImgTouchStart);
+                img.removeEventListener('touchmove', _onImgTouchMove);
+                img.removeEventListener('touchend', _onImgTouchEnd);
+            }
         }
         document.removeEventListener('mousemove', _onMouseMove);
         document.removeEventListener('mouseup', _onMouseUp);
         document.removeEventListener('mouseleave', _onMouseUp);
+        _z.isPinching = false;
+        _z.dragging = false;
         if (dom.zoomBar) dom.zoomBar.classList.remove('visible');
     }
 
@@ -874,6 +1222,9 @@
         renderLightbox(idx);
         if (dom.zoomBar) dom.zoomBar.classList.remove('visible');
         
+        // 预加载相邻图片
+        preloadAdjacentImages(idx);
+        
         // 显示快捷键提示，3秒后淡出
         showShortcutsTip();
     }
@@ -902,14 +1253,36 @@
         dom.lightboxSpinner.style.display = 'flex';
         dom.lightboxImage.style.display = 'none';
         dom.lightboxVideo.style.display = 'none';
+        // 暂停并清空视频（防止切换时继续播放）
+        dom.lightboxVideo.pause();
+        dom.lightboxVideo.removeAttribute('src');
+        dom.lightboxVideo.load();
         _resetZoom();
 
         var isVid = !!(img.isVideo);
         if (isVid) {
-            dom.lightboxVideo.src = 'api.php?action=image_proxy&id=' + encodeURIComponent(img.id) + '&type=image&_t=' + Date.now();
+            // 视频灯箱：暂停图片缩放功能，展开媒体容器以容纳视频控件
+            _unbindZoom();
+            if (dom.mediaWrapper) {
+                dom.mediaWrapper.style.pointerEvents = 'auto';
+                dom.mediaWrapper.style.bottom = isMobile ? '70px' : '80px';
+            }
+            dom.lightboxImage.style.display = 'none';
+            var videoSrc = 'api.php?action=image_proxy&id=' + encodeURIComponent(img.id) + '&type=image&_t=' + Date.now();
+            dom.lightboxVideo.src = videoSrc;
             dom.lightboxVideo.style.display = 'block';
+            dom.lightboxVideo.load();
+            dom.lightboxVideo.play().catch(function(){});
             dom.lightboxSpinner.style.display = 'none';
+            if (dom.zoomBar) dom.zoomBar.classList.remove('visible');
         } else {
+            // 图片灯箱：恢复媒体容器样式
+            if (dom.mediaWrapper) {
+                dom.mediaWrapper.style.pointerEvents = '';
+                dom.mediaWrapper.style.bottom = '';
+            }
+            // 图片灯箱：重新绑定缩放功能
+            _bindZoom();
             // 加载原图（带时间戳防止缓存）
             dom.lightboxImage.onload = function () {
                 dom.lightboxSpinner.style.display = 'none';
@@ -923,11 +1296,6 @@
                 // 应用初始缩放
                 dom.lightboxImage.style.transform = 'scale(' + _z.initialScale + ')';
                 _updateZoomBar();
-                
-                // 调试信息
-                console.log('Image loaded:', dom.lightboxImage.naturalWidth + 'x' + dom.lightboxImage.naturalHeight, 
-                           'Initial scale:', _z.initialScale, 
-                           'Display size:', Math.round(dom.lightboxImage.naturalWidth * _z.initialScale) + 'x' + Math.round(dom.lightboxImage.naturalHeight * _z.initialScale));
             };
             dom.lightboxImage.onerror = function () {
                 dom.lightboxSpinner.style.display = 'none';
@@ -950,22 +1318,27 @@
             var t = state.tagMap[tid];
             return t ? '<span class="lb-tag" style="background:' + safeColor(t.color) + '">' + esc(t.name) + '</span>' : '';
         }).join('');
-        var sz = img.width && img.height ? img.width + ' x ' + img.height : (img.size ? formatSize(img.size) : '');
         dom.lightboxInfo.innerHTML =
             '<div class="lb-name">' + esc(img.name || 'Untitled') + '</div>' +
-            (tags ? '<div class="lb-tags">' + tags + '</div>' : '') +
-            (sz ? '<div class="lb-size">' + esc(sz) + '</div>' : '');
+            (tags ? '<div class="lb-tags">' + tags + '</div>' : '');
         updateLightboxNav();
 
         var dlUrl = 'api.php?action=image_proxy&id=' + encodeURIComponent(img.id) + '&type=download';
         dom.lightboxDownload.href = dlUrl;
         dom.lightboxDownload.download = (img.name || 'image') + '.' + (img.ext || 'jpg');
+        // 下载按钮显示文件大小
+        var sizeText = img.size ? formatSize(img.size) : '';
+        dom.lightboxDownload.innerHTML = '&#11015; 下载' + (sizeText ? ' <span class="lb-download-size">' + sizeText + '</span>' : '');
     }
 
     function closeLightbox() {
         _resetZoom(); _unbindZoom();
         dom.lightbox.classList.remove('active');
         if (dom.lightboxVideo) { dom.lightboxVideo.pause(); dom.lightboxVideo.src = ''; }
+        if (dom.mediaWrapper) {
+            dom.mediaWrapper.style.pointerEvents = '';
+            dom.mediaWrapper.style.bottom = '';
+        }
         document.body.style.overflow = '';
         state.lightboxIndex = -1;
         state.chipsExpanded = false;
@@ -979,11 +1352,12 @@
         updateLightboxNav();
         renderLightbox(ni);
         if (dom.zoomBar) dom.zoomBar.classList.remove('visible');
+        // 预加载相邻图片
+        preloadAdjacentImages(ni);
     }
 
     function updateLightboxNav() {
         var t = state.images.length, i = state.lightboxIndex;
-        dom.lightboxCounter.textContent = (i + 1) + ' / ' + t;
         dom.lightboxPrev.style.visibility = i > 0 ? 'visible' : 'hidden';
         dom.lightboxNext.style.visibility = i < t - 1 ? 'visible' : 'hidden';
     }
@@ -1227,19 +1601,84 @@
         }
     }
 
+    // ── 触摸手势支持 ─────────────────────────────────────────────
+    var _touch = {
+        startX: 0, startY: 0,
+        startTime: 0,
+        isSwiping: false
+    };
+
+    function setupTouchGestures() {
+        if (!isMobile) return;
+        
+        // 灯箱触摸滑动
+        var lightboxContent = dom.lightbox ? dom.lightbox.querySelector('.lightbox-content') : null;
+        if (lightboxContent) {
+            lightboxContent.addEventListener('touchstart', onTouchStart, { passive: true });
+            lightboxContent.addEventListener('touchmove', onTouchMove, { passive: true });
+            lightboxContent.addEventListener('touchend', onTouchEnd, { passive: true });
+        }
+    }
+
+    function onTouchStart(e) {
+        if (e.touches.length === 1) {
+            _touch.startX = e.touches[0].clientX;
+            _touch.startY = e.touches[0].clientY;
+            _touch.startTime = Date.now();
+            _touch.isSwiping = true;
+        }
+    }
+
+    function onTouchMove(e) {
+        if (!_touch.isSwiping || e.touches.length !== 1) return;
+        // 可以在这里添加实时反馈
+    }
+
+    function onTouchEnd(e) {
+        if (!_touch.isSwiping) return;
+        _touch.isSwiping = false;
+        
+        // 图片已放大时不触发滑动切换（由触摸手势处理平移）
+        if (_z.scale > _z.initialScale * 1.01) return;
+        
+        var endX = e.changedTouches[0].clientX;
+        var endY = e.changedTouches[0].clientY;
+        var deltaX = endX - _touch.startX;
+        var deltaY = endY - _touch.startY;
+        var deltaTime = Date.now() - _touch.startTime;
+        
+        // 水平滑动距离 > 50px，垂直滑动距离 < 50px，时间 < 500ms
+        if (Math.abs(deltaX) > 50 && Math.abs(deltaY) < 50 && deltaTime < 500) {
+            if (deltaX > 0) {
+                // 向右滑动 = 上一张
+                lightboxNav(-1);
+            } else {
+                // 向左滑动 = 下一张
+                lightboxNav(1);
+            }
+        }
+    }
+
     // ── 工具函数 ─────────────────────────────────────────────
     function esc(s) { s = (s == null ? '' : String(s)); return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
     function escAttr(s) { s = (s == null ? '' : String(s)); return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
     function safeColor(c) {
         if (!c || typeof c !== 'string') return '#888';
+        // 合法的hex格式：#fff 或 #ffffff
         if (/^#[0-9a-f]{3,6}$/i.test(c)) return c;
+        // 合法的rgba格式：rgba(r,g,b) 或 rgba(r,g,b,a)
+        if (/^rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(,\s*[\d.]+\s*)?\)$/i.test(c)) return c;
+        // 合法的hsl格式
+        if (/^hsla?\(\s*\d+\s*,\s*\d+%?\s*,\s*\d+%?\s*(,\s*[\d.]+\s*)?\)$/i.test(c)) return c;
+        // 数字格式："255,100,50" 转换为 hex
         if (/^[0-9,.-]+$/.test(c)) {
             var parts = c.split(',');
             if (parts.length >= 3) return '#' + parts.slice(0, 3).map(function (p) {
                 return Math.max(0, Math.min(255, Math.round(parseFloat(p)))).toString(16).padStart(2, '0');
             }).join('');
         }
-        return c;
+        // 非法格式返回默认颜色
+        return '#888';
     }
     function formatSize(b) {
         if (!b) return '';
